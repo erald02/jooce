@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "PluginProcessor.h"
 
 //==============================================================================
 /*
@@ -13,6 +14,9 @@ public:
     //==============================================================================
     MainComponent();
     ~MainComponent() override;
+
+    std::unique_ptr<Plugin> plugin;
+
 
     //==============================================================================
     void prepareToPlay (int samplesPerBlockExpected, double sampleRate) override;

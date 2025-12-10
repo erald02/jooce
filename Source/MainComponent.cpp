@@ -19,6 +19,7 @@ MainComponent::MainComponent()
         // Specify the number of input and output channels that we want to open
         setAudioChannels (2, 2);
     }
+    plugin = std::make_unique<Plugin>();
 }
 
 MainComponent::~MainComponent()
@@ -37,53 +38,81 @@ void MainComponent::prepareToPlay (int samplesPerBlockExpected, double sampleRat
     // but be careful - it will be called on the audio thread, not the GUI thread.
 
     // For more details, see the help for AudioProcessor::prepareToPlay()
+    if (plugin != nullptr)
+    {
+        plugin->position = 0;
+    }
 }
 
 void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferToFill)
 {
-    // Your audio-processing code goes here!
-
-    // For more details, see the help for AudioProcessor::getNextAudioBlock()
-
-    // Right now we are not producing any data, in which case we need to clear the buffer
-    // (to prevent the output of random noise)
-    // bufferToFill.clearActiveBufferRegion();
-    juce::Random random;
-
+    if (plugin == nullptr || plugin->fileBuffer == nullptr) 
+    {
+        bufferToFill.clearActiveBufferRegion();
+        return;
+    }
 
     auto* device = deviceManager.getCurrentAudioDevice();
-    auto activeInputChannels = device->getActiveInputChannels();
-    auto activeOutputChannels = device->getActiveOutputChannels();
-
-    auto maxInputChannels = activeInputChannels.getHighestBit() + 1;
-    auto maxOutputChannels = activeOutputChannels.getHighestBit() + 1;
-
-    auto level = 0.2F;
-    for (auto channel = 0; channel < maxOutputChannels; ++channel)
+    
+    if (device == nullptr)
     {
-        if ((!activeOutputChannels[channel]) || maxInputChannels == 0){
-                bufferToFill.buffer->clear (channel, bufferToFill.startSample, bufferToFill.numSamples);
+        bufferToFill.clearActiveBufferRegion();
+        return;
+    }
+    
+    auto activeOutputChannels = device->getActiveOutputChannels();
+    auto maxOutputChannels = activeOutputChannels.getHighestBit() + 1;
+    
+    if (maxOutputChannels == 0)
+    {
+        bufferToFill.clearActiveBufferRegion();
+        return;
+    }
+    
+    int fileNumChannels = plugin->fileBuffer->getNumChannels();
+    int fileLength = plugin->fileBuffer->getNumSamples();
+    int numSamples = bufferToFill.numSamples;
+    
+    if (fileNumChannels == 0 || fileLength == 0)
+    {
+        bufferToFill.clearActiveBufferRegion();
+        return;
+    }
+    for (int channel = 0; channel < maxOutputChannels; ++channel)
+    {
+        if (!activeOutputChannels[channel])
+        {
+            bufferToFill.buffer->clear(channel, bufferToFill.startSample, numSamples);
+            continue;
         }
-        else
+
+        auto* outBuffer = bufferToFill.buffer->getWritePointer(channel, bufferToFill.startSample);
+        
+        int fileChannel = channel % fileNumChannels;
+        const auto* fileData = plugin->fileBuffer->getReadPointer(fileChannel);
+
+        for (int sample = 0; sample < numSamples; ++sample)
         {
-        auto actualInputChannel = channel % maxInputChannels;
-        if (!activeInputChannels[channel])
-        {
-            bufferToFill.buffer->clear (channel, bufferToFill.startSample, bufferToFill.numSamples);
-        }
-        else 
-        {
-            const auto* inBuffer = bufferToFill.buffer->getReadPointer (actualInputChannel,
-                bufferToFill.startSample);
-            auto* outBuffer = bufferToFill.buffer->getWritePointer (channel, bufferToFill.startSample);
-            for (auto sample = 0; sample < bufferToFill.numSamples; ++sample)
+            if (plugin->position < fileLength)
             {
-                auto noise = (random.nextFloat() * 2.0F) - 1.0F;
-                outBuffer[sample] = inBuffer[sample] + (inBuffer[sample] * noise * level);
+                outBuffer[sample] = fileData[plugin->position];
+            }
+            else
+            {
+                outBuffer[sample] = 0.0f;
+            }
+            
+            if (channel == maxOutputChannels - 1)
+            {
+                plugin->position++;
+                
+                if (plugin->position >= fileLength)
+                {
+                    plugin->position = 0; 
+                }
             }
         }
     }
-}
 }
 
 void MainComponent::releaseResources()
